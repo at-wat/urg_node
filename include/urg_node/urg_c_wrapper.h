@@ -176,8 +176,6 @@ private:
 
   ros::Duration getNativeClockOffset(size_t num_measurements);
 
-  ros::Duration getTimeStampOffset(size_t num_measurements);
-
   /**
    * @brief calculate the crc of a given set of bytes.
    * @param bytes The bytes array to be processed.

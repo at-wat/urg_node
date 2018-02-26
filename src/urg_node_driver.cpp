@@ -536,9 +536,9 @@ void UrgNode::scanThread()
           }
         }
       }
-      catch (...)
+      catch (std::runtime_error &e)
       {
-        ROS_ERROR_THROTTLE(10.0, "Unknown error grabbing Hokuyo scan.");
+        ROS_ERROR_THROTTLE(10.0, "Unknown error grabbing Hokuyo scan. (%s)", e.what());
         error_count_++;
       }
 

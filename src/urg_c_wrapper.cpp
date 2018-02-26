@@ -49,6 +49,7 @@ URGCWrapper::URGCWrapper(const std::string& ip_address, const int ip_port, bool&
   serial_port_ = "";
   serial_baud_ = 0;
 
+  system_latency_ = ros::Duration(0.0);
 
   long baudrate_or_port = (long)ip_port;
   const char *device = ip_address.c_str();
@@ -217,7 +218,7 @@ bool URGCWrapper::grabScan(const sensor_msgs::LaserScanPtr& msg)
   }
 
   // Fill scan
-  msg->header.stamp.fromNSec((uint64_t)system_time_stamp);
+  msg->header.stamp.fromNSec((uint64_t)time_stamp * 1000 * 1000);
   msg->header.stamp = msg->header.stamp + system_latency_ + user_latency_ + getAngularTimeOffset();
   msg->ranges.resize(num_beams);
   if (use_intensity_)
@@ -274,7 +275,7 @@ bool URGCWrapper::grabScan(const sensor_msgs::MultiEchoLaserScanPtr& msg)
   }
 
   // Fill scan (uses vector.reserve wherever possible to avoid initalization and unecessary memory expansion)
-  msg->header.stamp.fromNSec((uint64_t)system_time_stamp);
+  msg->header.stamp.fromNSec((uint64_t)time_stamp * 1000 * 1000);
   msg->header.stamp = msg->header.stamp + system_latency_ + user_latency_ + getAngularTimeOffset();
   msg->ranges.reserve(num_beams);
   if (use_intensity_)
@@ -873,30 +874,7 @@ ros::Duration URGCWrapper::getAngularTimeOffset() const
 
 ros::Duration URGCWrapper::computeLatency(size_t num_measurements)
 {
-  system_latency_.fromNSec(0);
-
-  ros::Duration start_offset = getNativeClockOffset(1);
-  ros::Duration previous_offset;
-
-  std::vector<ros::Duration> time_offsets(num_measurements);
-  for (size_t i = 0; i < num_measurements; i++)
-  {
-    ros::Duration scan_offset = getTimeStampOffset(1);
-    ros::Duration post_offset = getNativeClockOffset(1);
-    ros::Duration adjusted_scan_offset = scan_offset - start_offset;
-    ros::Duration adjusted_post_offset = post_offset - start_offset;
-    ros::Duration average_offset;
-    average_offset.fromSec((adjusted_post_offset.toSec() + previous_offset.toSec()) / 2.0);
-
-    time_offsets[i] = adjusted_scan_offset - average_offset;
-
-    previous_offset = adjusted_post_offset;
-  }
-
-  // Get median value
-  // Sort vector using nth_element (partially sorts up to the median index)
-  std::nth_element(time_offsets.begin(), time_offsets.begin() + time_offsets.size() / 2, time_offsets.end());
-  system_latency_ = time_offsets[time_offsets.size() / 2];
+  system_latency_ = -getNativeClockOffset(1);
   // Angular time offset makes the output comparable to that of hokuyo_node
   return system_latency_ + getAngularTimeOffset();
 }
@@ -935,64 +913,6 @@ ros::Duration URGCWrapper::getNativeClockOffset(size_t num_measurements)
     ss << "Cannot stop time stamp mode.";
     throw std::runtime_error(ss.str());
   };
-
-  // Return median value
-  // Sort vector using nth_element (partially sorts up to the median index)
-  std::nth_element(time_offsets.begin(), time_offsets.begin() + time_offsets.size() / 2, time_offsets.end());
-  return time_offsets[time_offsets.size() / 2];
-}
-
-ros::Duration URGCWrapper::getTimeStampOffset(size_t num_measurements)
-{
-  if (started_)
-  {
-    std::stringstream ss;
-    ss << "Cannot get time stamp offset while started.";
-    throw std::runtime_error(ss.str());
-  }
-
-  start();
-
-  std::vector<ros::Duration> time_offsets(num_measurements);
-  for (size_t i = 0; i < num_measurements; i++)
-  {
-    long time_stamp;
-    unsigned long long system_time_stamp;
-    int ret = 0;
-
-    if (measurement_type_ == URG_DISTANCE)
-    {
-      ret = urg_get_distance(&urg_, &data_[0], &time_stamp, &system_time_stamp);
-    }
-    else if (measurement_type_ == URG_DISTANCE_INTENSITY)
-    {
-      ret = urg_get_distance_intensity(&urg_, &data_[0], &intensity_[0], &time_stamp, &system_time_stamp);
-    }
-    else if (measurement_type_ == URG_MULTIECHO)
-    {
-      ret = urg_get_multiecho(&urg_, &data_[0], &time_stamp, &system_time_stamp);
-    }
-    else if (measurement_type_ == URG_MULTIECHO_INTENSITY)
-    {
-      ret = urg_get_multiecho_intensity(&urg_, &data_[0], &intensity_[0], &time_stamp, &system_time_stamp);
-    }
-
-    if (ret <= 0)
-    {
-      std::stringstream ss;
-      ss << "Cannot get scan to measure time stamp offset.";
-      throw std::runtime_error(ss.str());
-    }
-
-    ros::Time laser_timestamp;
-    laser_timestamp.fromNSec(1e6 * (uint64_t)time_stamp);
-    ros::Time system_time;
-    system_time.fromNSec((uint64_t)system_time_stamp);
-
-    time_offsets[i] = laser_timestamp - system_time;
-  }
-
-  stop();
 
   // Return median value
   // Sort vector using nth_element (partially sorts up to the median index)
